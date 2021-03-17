@@ -1,0 +1,140 @@
+
+
+```{r}
+starting_bg = 70 + runif(1)*(200-70)
+T = 14*24*60/5
+patient_trend = min(1, max(-1, rnorm(1,sd = 0.25)))
+pat_cgm_ts = vector(mode="integer", length = T)
+pat_cgm_ts[1] = starting_bg
+local_trend = vector(mode="integer", length = T)
+local_trend[1] = patient_trend
+p_switch_trend = vector(mode="integer", length = T)
+p_switch_trend[1] = 0
+
+for(i in 2:T) {
+  # switch sign of trend with prob proportional to how close the BG is to bounds 40,400
+  trend_sign = sign(local_trend[i-1])
+  p_switch_trend[i] = 
+    (trend_sign==1)*(1/(400-min(399,pat_cgm_ts[i-1]))^2 + 0.33/(180-min(179,pat_cgm_ts[i-1]))) + 
+    (trend_sign==-1)*(1/(max(41,pat_cgm_ts[i-1])-40)^2 + 0.33/(max(71,pat_cgm_ts[i-1])-70))
+  p_switch_trend[i] = max(0,min(1,p_switch_trend[i]))
+  switch_trend = rbinom(1,1,p_switch_trend[i])
+  if(switch_trend==1){
+    local_trend[i] = -1*local_trend[i-1]*runif(1)
+  } else {
+    local_trend[i] = local_trend[i-1] + min(1, max(-1, rnorm(1,mean = -1*local_trend[i-1]/50, sd = 0.25)))
+  }
+  
+  pat_cgm_ts[i] = pat_cgm_ts[i-1] + round(local_trend[i-1]*5) + round(patient_trend*5)
+  
+  # local_trend[i] = local_trend[i-1] + min(1, max(-1, rnorm(1,sd = 0.25))) - 
+  #   0.1/(400 - min(399, pat_cgm_ts[i-1]))^2 + 0.1/(max(41, pat_cgm_ts[i-1]) - 40)^2
+  # pat_cgm_ts[i] = pat_cgm_ts[i-1] + round(patient_trend) + round(local_trend[i-1]) -
+  #   20/(400 - min(399, pat_cgm_ts[i-1]))^2 + 20/(max(41, pat_cgm_ts[i-1]) - 40)^2
+}
+
+library(ggplot2)
+plot_dt = data.table(y=c(local_trend, pat_cgm_ts,p_switch_trend), ts=rep(1:T,3), c=rep(c("trend","bg","p_switch"), each=T))
+plot_dt[c=="bg", utir := 180]
+plot_dt[c=="bg", ltir := 70]
+plot_dt[c=="bg", ehyp := 54]
+ggplot(plot_dt, 
+       aes(x=ts, y=y, color=c)) + geom_line() + theme_bw() + facet_wrap(~c, scales = "free",ncol = 1) +
+  geom_hline(aes(yintercept = ltir), linetype="dashed") + geom_hline(aes(yintercept = utir), linetype="dashed") +
+  geom_hline(aes(yintercept = ehyp), linetype="dashed", color="red")
+```
+
+Make traces for fake Dexcom IDs
+
+```{r}
+N_patients = 30
+dexcom_ids = c(
+  'u1026251273229720000',
+  'u1055867916438730000',
+  'u1081653238739820000',
+  'u1145689806900920000',
+  'u1159587756264960000',
+  'u1274028692394500000',
+  'u1307627999223770000',
+  'u1343591913813730000',
+  'u1363760089501740000',
+  'u1370340408058840000',
+  'u1402099990285930000',
+  'u1403644844423980000',
+  'u1408080802066250000',
+  'u1480120917549360000',
+  'u1550076654413720000',
+  'u1550726285669950000',
+  'u1552309161517770000',
+  'u1572294509271160000',
+  'u1685404232237490000',
+  'u1692457735072820000',
+  'u1785766008310020000',
+  'u1806166082154960000',
+  'u1843432995723560000',
+  'u1843443995574490000',
+  'u1904690920608120000',
+  'u1909672706155110000',
+  'u1933897448703650000',
+  'u1962112239096310000',
+  'u1979888220084830000',
+  'u1983551805606110000'
+)
+template = fread("~/Downloads/SURF-TIDE/cgm_template.csv")
+
+for(id in dexcom_ids) {
+  starting_bg = 70 + runif(1)*(200-70)
+  dt_out = copy(template)
+  T = nrow(dt_out)
+  patient_trend = min(1, max(-1, rnorm(1,sd = 0.25)))
+  pat_cgm_ts = vector(mode="integer", length = T)
+  pat_cgm_ts[1] = starting_bg
+  local_trend = vector(mode="integer", length = T)
+  local_trend[1] = patient_trend
+  p_switch_trend = vector(mode="integer", length = T)
+  p_switch_trend[1] = 0
+  
+  for(i in 2:T) {
+    # switch sign of trend with prob proportional to how close the BG is to bounds 40 and 400
+    trend_sign = sign(local_trend[i-1])
+    p_switch_trend[i] = 
+      (trend_sign==1)*(1/(400-min(399,pat_cgm_ts[i-1]))^2 + 0.33/(180-min(179,pat_cgm_ts[i-1]))) + 
+      (trend_sign==-1)*(1/(max(41,pat_cgm_ts[i-1])-40)^2 + 0.33/(max(71,pat_cgm_ts[i-1])-70))
+    p_switch_trend[i] = max(0,min(1,p_switch_trend[i]))
+    switch_trend = rbinom(1,1,p_switch_trend[i])
+    if(switch_trend==1){
+      local_trend[i] = -1*local_trend[i-1]*runif(1)
+    } else {
+      local_trend[i] = local_trend[i-1] + min(1, max(-1, rnorm(1,mean = -1*local_trend[i-1]/50, sd = 0.25)))
+    }
+    
+    # break the glass when things go crazy
+    if(pat_cgm_ts[i-1]<50) local_trend[i] = 1
+    if(pat_cgm_ts[i-1]>350) local_trend[i] = -1
+    
+    
+    pat_cgm_ts[i] = pat_cgm_ts[i-1] + round(local_trend[i]*5) + round(patient_trend*5)
+  }
+  
+  dt_out$`Glucose Value (mg/dL)` = pat_cgm_ts
+  dt_out$id = id
+  fwrite(dt_out, paste0("~/Downloads/SURF-TIDE/fake_data/fake_dt_id_", id, ".csv"))
+}
+```
+
+
+
+Look at data
+```{r, fig.width=7}
+library(bit64)
+fake_data = rbindlist(lapply(list.files(path="~/Downloads/SURF-TIDE/fake_data/", full.names = T), fread))
+fake_data[, ts:=as.POSIXct(`Timestamp (YYYY-MM-DDThh:mm:ss)`, tryFormats=c("%Y-%m-%dT%H:%M:%OS"))]
+
+ggplot(fake_data, 
+       aes(x=ts, y=`Glucose Value (mg/dL)`)) + geom_line() + theme_bw() + facet_wrap(~id, ncol = 5) +
+  geom_hline(yintercept = 70, linetype="dashed") + geom_hline(yintercept = 180, linetype="dashed") +
+  geom_hline(yintercept = 54, linetype="dashed", color="red")
+```
+
+
+
