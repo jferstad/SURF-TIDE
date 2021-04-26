@@ -24,6 +24,7 @@ td = tempfile.mkdtemp()
 
 dexcom_numbers_file = "dexcom_numbers.xls"
 
+CLINIC_ID = "{You can find this via the Dexcom Clarity web portal}"
 
 weeknum = tick.isocalendar()[1]
 weekindex = weeknum % 4 + 1
