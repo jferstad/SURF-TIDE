@@ -12,35 +12,19 @@ from datetime import datetime
 from datetime import timedelta
 import subprocess
 import tempfile
-import os
-import sys
+import os, sys, json, requests
 from rank_patients import rank_the_patients
 from rank_patients import add_start_end_day_times
+from io import StringIO
+from joblib import Parallel, delayed
 
 tick = datetime.now()
 
 td = tempfile.mkdtemp()
 
-# function to take care of downloading file
-def enable_download_headless(browser,download_dir):
-	browser.command_executor._commands["send_command"] = ("POST", '/session/$sessionId/chromium/send_command')
-	params = {
-		'cmd':'Page.setDownloadBehavior',
-		'params': {
-			'behavior': 'allow', 
-			'downloadPath': td
-		}
-	}
-	browser.execute("send_command", params)
+dexcom_numbers_file = "dexcom_numbers.xls"
 
-if sys.argv[1] == "test":
-	dexcom_numbers_file = "dexcom_numbers_test.xls"
-	reviewer = sys.argv[2]
-else:
-	dexcom_numbers_file = "dexcom_numbers.xls"
-	reviewer = sys.argv[1]
 
-print("Fetching patients for " + reviewer)	
 weeknum = tick.isocalendar()[1]
 weekindex = weeknum % 4 + 1
 print("week index: " + str(weekindex))
@@ -50,8 +34,7 @@ patient_df = pd.read_excel(dexcom_numbers_file,
 		'Population': object, 'Dexcom_Number': object, 'Name': object,
 		'Reviewer': object, 'WeeksToReview': int}).dropna()
 
-# Filter by reviewer and week number
-patient_df = patient_df[patient_df["Reviewer"] == reviewer]
+# Filter by week number
 patient_df = patient_df[(patient_df["WeeksToReview"] == 0) | (patient_df["WeeksToReview"] == weekindex)]
 patient_df['Dexcom_Number'] = patient_df['Dexcom_Number'].str.replace('u', '', regex=False)
 
@@ -59,70 +42,26 @@ num_of_patients = len(patient_df.index)
 patient_df = patient_df.reset_index()
 print("Downloading data for " + str(num_of_patients) + " patients")
 
+### GRAB DEXCOM API TOKEN WITH CLINIC CREDENTIALS
 
-# LOGGING INTO DEXCOM
 # options = webdriver.ChromeOptions()
-# options.add_experimental_option("prefs", {
-#   "download.default_directory": td,
-#   "download.prompt_for_download": False,
-#   "download.directory_upgrade": True,
-#   "safebrowsing.enabled": True
-# })
-# options.add_argument("download.default_directory=" + td)
-# options.add_argument("--start-maximized")
-
+# options.add_argument("--headless")
+# options.add_argument("--window-size=1920,1080")
+# options.add_argument("--disable-gpu")
 # driver = webdriver.Chrome(ChromeDriverManager().install(), options=options)
 # driver.get("https://clarity.dexcom.com/professional/")
 # time.sleep(3)
-# htmlSource = driver.page_source
-
 # driver.find_element_by_name("username").send_keys("USERNAME")
 # driver.find_element_by_name("password").send_keys("PASSWORD")
 # time.sleep(1)
-
 # driver.find_element_by_xpath("//button[text()='Login']").click()
-
 # time.sleep(3)
-
-# function to handle setting up headless download
-# enable_download_headless(driver, td)
-
-# method to get the downloaded file name
-def getDownLoadedFileName(waitTime):
-	driver.execute_script("window.open()")
-	# switch to new tab
-	driver.switch_to.window(driver.window_handles[-1])
-	# navigate to chrome downloads
-	driver.get('chrome://downloads')
-	# define the endTime
-	endTime = time.time()+waitTime
-	while True:
-		try:
-			# get downloaded percentage
-			downloadPercentage = driver.execute_script(
-				"return document.querySelector('downloads-manager').shadowRoot.querySelector('#downloadsList downloads-item').shadowRoot.querySelector('#progress').value")
-			# check if downloadPercentage is 100 (otherwise the script will keep waiting)
-			if downloadPercentage == 100:
-				# return the file name once the download is completed
-				toreturn = driver.execute_script("return document.querySelector('downloads-manager').shadowRoot.querySelector('#downloadsList downloads-item').shadowRoot.querySelector('div#content  #file-link').text")
-				driver.execute_script("window.close()")
-				return toreturn
-		except Exception as e:
-			#print(e)
-			toreturn = driver.execute_script("return document.querySelector('downloads-manager').shadowRoot.querySelector('#downloadsList downloads-item').shadowRoot.querySelector('div#content  #file-link').text")
-			driver.execute_script("window.close()")
-			return toreturn
-			#pass
-		time.sleep(1)
-		if time.time() > endTime:
-			toreturn = driver.execute_script("return document.querySelector('downloads-manager').shadowRoot.querySelector('#downloadsList downloads-item').shadowRoot.querySelector('div#content  #file-link').text")
-			driver.execute_script("window.close()")
-			return toreturn
-			#break
+# api_token_dict = json.loads(driver.execute_script("return window.localStorage['sweetspot-api-token'];"))
+# api_token = api_token_dict['token']
+# print(api_token)
 
 
-
-# CODE TO FETCH FROM Fake Data
+### CODE TO FETCH FROM FAKE DATA (DISABLE IF USING DEXCOM API)
 for index, row in patient_df.iterrows():
 	print("Downloading data for patient " + str(index+1) + " of " + str(num_of_patients))
 	num = row['Dexcom_Number']
@@ -143,57 +82,53 @@ for index, row in patient_df.iterrows():
 	dl['population'] = row['Population']
 	dl.to_csv(os.path.join(td, "proc_" + num + ".csv"), index = False)
 
-# CODE TO FETCH FROM DEXCOM 
-# last_downloaded_file = ''
-# for index, row in patient_df.iterrows():
+
+### ITERATE OVER PATIENTS AND DOWNLOAD CGM DATA WITH API
+
+# request_start_date = tick - timedelta(13)
+# request_start_date = f"{request_start_date:%Y-%m-%d}"
+# request_end_date = tick + timedelta(1)
+# request_end_date = f"{request_end_date:%Y-%m-%d}"
+# request_data = {
+# 	'locale':'en-US',
+# 	'units':'mgdl',
+# 	"dateInterval":request_start_date+'/'+request_end_date,
+# 	'accessToken':api_token}
+# print(request_data)
+
+# def grab_patient_data(index, row):
 # 	print("Downloading data for patient " + str(index+1) + " of " + str(num_of_patients))
 # 	num = row['Dexcom_Number']
-# 	max_attempts_per_patient = 10
-# 	attempt = 0
-# 	driver.switch_to.window(driver.window_handles[0])
-# 	driver.get("https://clarity.dexcom.com/professional/patients/" + num + "/export")
-# 	while (True):
-# 		attempt = attempt + 1
-# 		try:
-# 			time.sleep(1)
-# 			driver.find_element_by_name("submitExport").click()
-# 			fn = getDownLoadedFileName(3)
-# 			if fn == last_downloaded_file:
-# 				raise Error('No New File Downloaded; Retrying...')
-# 			else:
-# 				last_downloaded_file = fn
+# 	api_request_url = 'https://clarity.dexcom.com/api/v1/clinics/{c}/patients/{p}/export'.format(c=CLINIC_ID, p=num)
+	
+# 	try:
+# 		response = requests.post(api_request_url, data=request_data)
+# 		dl = pd.read_csv(StringIO(response.text))
 
-# 			dl = pd.read_csv(os.path.join(td, fn))
+# 		# Remove unneeded columns
+# 		dl = dl.rename(columns={"Timestamp (YYYY-MM-DDThh:mm:ss)": "ts", "Glucose Value (mg/dL)": "bg"})
+# 		dl = dl[["ts", "bg"]]
 
-# 			# Remove unneeded columns
-# 			dl = dl.rename(columns={"Timestamp (YYYY-MM-DDThh:mm:ss)": "ts", "Glucose Value (mg/dL)": "bg"})
-# 			dl = dl[["ts", "bg"]]
+# 		# Replace High and Low bg values
+# 		dl['bg'] = dl['bg'].replace(['High'], 400)
+# 		dl['bg'] = dl['bg'].replace(['Low'], 40)
 
-# 			# Replace High and Low bg values
-# 			dl['bg'] = dl['bg'].replace(['High'], 400)
-# 			dl['bg'] = dl['bg'].replace(['Low'], 40)
+# 		# Add Name column to download
+# 		dl['patient_id'] = num
+# 		dl['patient_name'] = row['Name']
+# 		dl['population'] = row['Reviewer']
+# 		dl.to_csv(os.path.join(td, "proc_" + num + ".csv"), index = False)
 
-# 			# Add Name column to download
-# 			dl['patient_id'] = num
-# 			dl['patient_name'] = row['Name']
-# 			dl['population'] = row['Population']
-# 			dl.to_csv(os.path.join(td, "proc_" + num + ".csv"), index = False)
+# 	except Exception as e:
+# 		# Create dummy dataframe to note missing data
+# 		dl = pd.DataFrame({'ts': [datetime.now().strftime("%Y-%m-%dT%H:%M:%S")], 'bg': [0]})
+# 		dl['patient_id'] = num
+# 		dl['patient_name'] = row['Name'] + " (MISSING DATA)"
+# 		dl['population'] = row['Reviewer']
+# 		dl.to_csv(os.path.join(td, "proc_" + num + ".csv"), index = False)
+# 		print("SKIPPED PATIENT -- data pull failed")
 
-# 			break
-# 		except Exception as e:
-# 			if attempt==max_attempts_per_patient//2:
-# 				driver.get("https://clarity.dexcom.com/professional/patients/" + num + "/export")
-
-# 			if attempt>=max_attempts_per_patient:
-# 				# Create dummy dataframe to note missing data
-# 				dl = pd.DataFrame({'ts': [datetime.now().strftime("%Y-%m-%dT%H:%M:%S")], 'bg': [0]})
-# 				dl['patient_id'] = num
-# 				dl['patient_name'] = row['Name'] + " (MISSING DATA)"
-# 				dl['population'] = row['Population']
-# 				dl.to_csv(os.path.join(td, "proc_" + num + ".csv"), index = False)
-# 				print("SKIPPING PATIENT -- reached max attempts")
-# 				break
-# driver.quit()
+# Parallel(n_jobs=32)(delayed(grab_patient_data)(index, row) for index, row in patient_df.iterrows())
 
 
 # Combine data into a single csv and remove temp files

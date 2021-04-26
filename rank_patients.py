@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 
-K = 20
+K = 60
 
 def rank_the_patients(df):
 	
@@ -48,10 +48,10 @@ def rank_the_patients(df):
 	  .rank(method='dense',ascending=False).astype(int)
 	pat_merge.drop(['neg_tir_for_ranking'], axis=1, inplace = True)
 
-	pat_merge['review'] = '(0) Error'
-	pat_merge.loc[pat_merge['rank'] <= K, 'review'] = '(1) Top ranked'
-	pat_merge.loc[(pat_merge['rank'] > K) & (pat_merge['num_flags'] > 0) & (pat_merge['flags_prev_week'] > 0), 'review'] = '(2) Two weeks outside targets'
-	pat_merge.loc[(pat_merge['rank'] > K) & ((pat_merge['num_flags'] == 0) | (pat_merge['flags_prev_week'] == 0)), 'review'] = '(3) None'
+	pat_merge['review'] = '(0) Error / Missing data'
+	pat_merge.loc[((pat_merge['rank'] <= K) & (pat_merge['time_worn'] > 0.75)), 'review'] = '(1) Top ranked'
+	pat_merge.loc[(pat_merge['rank'] > K) & (pat_merge['num_flags'] > 0) & (pat_merge['flags_prev_week'] > 0) & (pat_merge['time_worn'] > 0.75), 'review'] = '(2) Two weeks outside targets'
+	pat_merge.loc[(pat_merge['rank'] > K) & (pat_merge['time_worn'] > 0.75) & ((pat_merge['num_flags'] == 0) | (pat_merge['flags_prev_week'] == 0)), 'review'] = '(3) None'
 
 	# Join the raw data with the ranking
 	out = pd.merge(
